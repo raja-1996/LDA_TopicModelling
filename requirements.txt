@@ -1,0 +1,5 @@
+pyldavis
+gensim
+nltk
+pandas
+pydub
