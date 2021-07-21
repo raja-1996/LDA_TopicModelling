@@ -11,6 +11,7 @@ from gensim.models import CoherenceModel
 from gensim.utils import simple_preprocess
 
 nltk.download("stopwords")
+nltk.download("wordnet")
 en_stop = set(nltk.corpus.stopwords.words("english"))
 from nltk.stem import WordNetLemmatizer
 
