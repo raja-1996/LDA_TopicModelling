@@ -1,5 +1,5 @@
-pyldavis
-gensim
+gensim==3.8.3
 nltk
 pandas
-pydub
+pydub==0.24.1
+pyLDAvis==2.1.2

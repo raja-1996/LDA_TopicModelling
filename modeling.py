@@ -1,3 +1,5 @@
+%matplotlib inline
+
 import os
 import re
 
@@ -20,6 +22,7 @@ import warnings
 
 warnings.filterwarnings("ignore")
 import matplotlib.pyplot as plt
+from tqdm.notebook import tqdm
 
 
 class LdaModeling:
@@ -32,41 +35,46 @@ class LdaModeling:
             for item in sublist:
                 self.corpus.append(item)
 
+        self.corpus = data
+
+    def preprocess_text(self, document):
+        # Remove all the special characters
+        document = re.sub(r"\W", " ", str(document))
+
+        # remove all single characters
+        document = re.sub(r"\s+[a-zA-Z]\s+", " ", document)
+
+        # Remove single characters from the start
+        document = re.sub(r"\^[a-zA-Z]\s+", " ", document)
+
+        # Substituting multiple spaces with single space
+        document = re.sub(r"\s+", " ", document, flags=re.I)
+
+        # Removing prefixed 'b'
+        document = re.sub(r"^b\s+", "", document)
+
+        # Converting to Lowercase
+        document = document.lower()
+
+        # Lemmatization
+        tokens = document.split()
+        tokens = [stemmer.lemmatize(word) for word in tokens]
+        tokens = [word for word in tokens if word not in en_stop]
+        tokens = [word for word in tokens if len(word) > 5]
+
+        return tokens
+
     def preprocessing(self):
-        def preprocess_text(document):
-            # Remove all the special characters
-            document = re.sub(r"\W", " ", str(document))
-
-            # remove all single characters
-            document = re.sub(r"\s+[a-zA-Z]\s+", " ", document)
-
-            # Remove single characters from the start
-            document = re.sub(r"\^[a-zA-Z]\s+", " ", document)
-
-            # Substituting multiple spaces with single space
-            document = re.sub(r"\s+", " ", document, flags=re.I)
-
-            # Removing prefixed 'b'
-            document = re.sub(r"^b\s+", "", document)
-
-            # Converting to Lowercase
-            document = document.lower()
-
-            # Lemmatization
-            tokens = document.split()
-            tokens = [stemmer.lemmatize(word) for word in tokens]
-            tokens = [word for word in tokens if word not in en_stop]
-            tokens = [word for word in tokens if len(word) > 5]
-
-            return tokens
 
         processed_data = []
         for doc in self.corpus:
-            tokens = preprocess_text(doc)
+            tokens = self.preprocess_text(doc)
             processed_data.append(tokens)
 
         gensim_dictionary = corpora.Dictionary(processed_data)
-        gensim_corpus = [gensim_dictionary.doc2bow(token, allow_update=True) for token in processed_data]
+        gensim_corpus = [
+            gensim_dictionary.doc2bow(token, allow_update=True) for token in processed_data
+        ]
 
         return gensim_corpus, gensim_dictionary
 
@@ -79,18 +87,23 @@ class LdaModeling:
 
     def plotting(self, lda_model, gensim_corpus, gensim_dictionary):
         print("display")
-        vis_data = pyLDAvis.gensim.prepare(lda_model, gensim_corpus, gensim_dictionary)
-        pyLDAvis.show(vis_data)
+        vis_data = pyLDAvis.gensim.prepare(lda_model, gensim_corpus, gensim_dictionary, sort_topics=False)
+        return vis_data
 
-    def performance(self, lda_model, gensim_corpus, gensim_dictionary):
+    def performance(self, lda_model, texts, gensim_corpus, gensim_dictionary):
         print("\nPerplexity:", lda_model.log_perplexity(gensim_corpus))
+
+        texts = [self.preprocess_text(doc) for doc in texts]
+
         coherence_score_lda = CoherenceModel(
-            model=lda_model, texts=gensim_corpus, dictionary=gensim_dictionary, coherence="c_v"
+            model=lda_model, texts=texts, dictionary=gensim_dictionary, coherence="c_v"
         )
         coherence_score = coherence_score_lda.get_coherence()
         print("\nCoherence Score:", coherence_score)
 
-    def compute_coherence_values(self, gensim_corpus, gensim_dictionary, limit, start=2, step=3):
+    def compute_coherence_values(
+        self, docs, gensim_corpus, gensim_dictionary, limit, start=2, step=3
+    ):
         """
         Compute c_v coherence for various number of topics
 
@@ -108,20 +121,26 @@ class LdaModeling:
         """
         coherence_values = []
         model_list = []
-        for num_topics in range(start, limit, step):
+
+        texts = [self.preprocess_text(doc) for doc in docs]
+
+        for num_topics in tqdm(range(start, limit, step)):
             model = self.modeling(gensim_corpus, gensim_dictionary, num_topics)
             model_list.append(model)
+
             coherencemodel = CoherenceModel(
-                model=model, texts=gensim_corpus, dictionary=gensim_dictionary, coherence="c_v"
+                model=model, texts=texts, dictionary=gensim_dictionary, coherence="c_v"
             )
             coherence_values.append(coherencemodel.get_coherence())
 
         return model_list, coherence_values
 
-    def plot_coherence_scores_versus_topics(self, gensim_corpus, gensim_dictionary, limit, start, step):
+    def plot_coherence_scores_versus_topics(
+        self, docs, gensim_corpus, gensim_dictionary, limit, start, step
+    ):
 
         model_list, coherence_values = self.compute_coherence_values(
-            gensim_corpus, gensim_dictionary, limit, start, step
+            docs, gensim_corpus, gensim_dictionary, limit, start, step
         )
 
         x = range(start, limit, step)
@@ -171,7 +190,8 @@ class LdaModeling:
                     wp = ldamodel.show_topic(topic_num)
                     topic_keywords = ", ".join([word for word, prop in wp])
                     sent_topics_df = sent_topics_df.append(
-                        pd.Series([int(topic_num), round(prop_topic, 4), topic_keywords]), ignore_index=True
+                        pd.Series([int(topic_num), round(prop_topic, 4), topic_keywords]),
+                        ignore_index=True,
                     )
                 else:
                     break
@@ -183,15 +203,23 @@ class LdaModeling:
         return sent_topics_df
 
     def get_dominant_topic_of_sentence(self, optimal_model, gensim_corpus, data):
-        df_topic_sents_keywords = self.format_topics_sentences(ldamodel=optimal_model, corpus=gensim_corpus, texts=data)
+        df_topic_sents_keywords = self.format_topics_sentences(
+            ldamodel=optimal_model, corpus=gensim_corpus, texts=data
+        )
 
         # Format
         df_dominant_topic = df_topic_sents_keywords.reset_index()
-        df_dominant_topic.columns = ["Document_No", "Dominant_Topic", "Topic_Perc_Contrib", "Keywords", "Text"]
+        df_dominant_topic.columns = [
+            "Document_No",
+            "Dominant_Topic",
+            "Topic_Perc_Contrib",
+            "Keywords",
+            "Text",
+        ]
 
         return df_dominant_topic
 
-    def get_most_representative_documents_for_topics(self, df_topic_sents_keywords):
+    def get_most_representative_documents_for_topics(self, df_topic_sents_keywords, topn=5):
 
         sent_topics_sorteddf_mallet = pd.DataFrame()
 
@@ -199,14 +227,24 @@ class LdaModeling:
 
         for i, grp in sent_topics_outdf_grpd:
             sent_topics_sorteddf_mallet = pd.concat(
-                [sent_topics_sorteddf_mallet, grp.sort_values(["Perc_Contribution"], ascending=[0]).head(1)], axis=0
+                [
+                    sent_topics_sorteddf_mallet,
+                    grp.sort_values(["Topic_Perc_Contrib"], ascending=[0]).head(topn),
+                ],
+                axis=0,
             )
 
         # Reset Index
         sent_topics_sorteddf_mallet.reset_index(drop=True, inplace=True)
 
         # Format
-        sent_topics_sorteddf_mallet.columns = ["Topic_Num", "Topic_Perc_Contrib", "Keywords", "Text"]
+        sent_topics_sorteddf_mallet.columns = [
+            "Document_No",
+            "Dominant_Topic",
+            "Topic_Perc_Contrib",
+            "Keywords",
+            "Text",
+        ]
 
         return sent_topics_sorteddf_mallet
 
@@ -218,13 +256,20 @@ class LdaModeling:
         topic_contribution = round(topic_counts / topic_counts.sum(), 4)
 
         # Topic Number and Keywords
-        topic_num_keywords = df_topic_sents_keywords[["Dominant_Topic", "Topic_Keywords"]]
+        topic_num_keywords = df_topic_sents_keywords[["Dominant_Topic", "Keywords"]]
 
         # Concatenate Column wise
-        df_dominant_topics = pd.concat([topic_num_keywords, topic_counts, topic_contribution], axis=1)
+        df_dominant_topics = pd.concat(
+            [topic_num_keywords, topic_counts, topic_contribution], axis=1
+        )
 
         # Change Column names
-        df_dominant_topics.columns = ["Dominant_Topic", "Topic_Keywords", "Num_Documents", "Perc_Documents"]
+        df_dominant_topics.columns = [
+            "Dominant_Topic",
+            "Topic_Keywords",
+            "Num_Documents",
+            "Perc_Documents",
+        ]
 
         # Show
         return df_dominant_topics
